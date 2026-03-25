@@ -19,7 +19,11 @@ export type ErrorCode =
   | 'RULE_SET_INVALID'
   | 'ESI_FILE_NOT_FOUND'
   | 'USER_NOT_FOUND'
-  | 'DEALER_NOT_FOUND';
+  | 'DEALER_NOT_FOUND'
+  | 'DEALER_USER_NOT_FOUND'
+  | 'ROLE_NOT_FOUND'
+  | 'ROLE_IN_USE'
+  | 'AUTH0_PROVISION_ERROR';
 
 export class ApiError extends Error {
   constructor(
