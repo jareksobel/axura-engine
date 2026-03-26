@@ -6,6 +6,10 @@ import { errorResponse, ApiError } from '@/lib/errors';
 import { listRuleConfigs, createRuleConfig, getRuleConfigByVersion } from '@/lib/db/queries/rules';
 import { validateRuleSet } from '@/lib/rules/validator';
 import { parse as parseYaml } from 'yaml';
+import { sql } from '@/lib/db/client';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('api.rules');
 
 const CreateRuleSchema = z.object({
   version: z.string().min(1).regex(/^v\d+\.\d+/, 'Version must match pattern vX.Y'),
@@ -66,6 +70,19 @@ export async function POST(req: NextRequest) {
       contentYaml: content_yaml,
       createdBy: ctx.sub,
     });
+
+    await sql`
+      INSERT INTO audit_log (action, resource_type, resource_id, performed_by, metadata)
+      VALUES (
+        'RULE_SET_CREATED',
+        'rule_config',
+        ${config.id},
+        ${ctx.sub},
+        ${JSON.stringify({ version, label: label ?? null })}
+      )
+    `;
+
+    log.info('Rule set created', { version, createdBy: ctx.sub });
 
     return NextResponse.json({ data: config }, { status: 201 });
   } catch (err) {

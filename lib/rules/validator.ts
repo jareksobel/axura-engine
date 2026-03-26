@@ -136,5 +136,21 @@ export function validateRuleSet(data: unknown): ValidationResult {
   // Rule 7: Base rate > 0 (enforced by Zod .positive())
   // Rule 8: No empty DTC lists (enforced by Zod .min(1))
 
+  // Rule 9: Threshold ordering — decline must be stricter than amber
+  const { odo_delta_decline_pct, odo_delta_amber_pct } = rs.triage.eligibility;
+  if (odo_delta_decline_pct <= odo_delta_amber_pct) {
+    errors.push(
+      `odo_delta_decline_pct (${odo_delta_decline_pct}) must be greater than odo_delta_amber_pct (${odo_delta_amber_pct})`,
+    );
+  }
+
+  // Rule 10: fuel_trim_sum_amber must be less than fuel_trim_sum_green (amber fires before green)
+  const { fuel_trim_sum_amber, fuel_trim_sum_green } = rs.triage.thresholds;
+  if (fuel_trim_sum_amber >= fuel_trim_sum_green) {
+    errors.push(
+      `fuel_trim_sum_amber (${fuel_trim_sum_amber}) must be less than fuel_trim_sum_green (${fuel_trim_sum_green})`,
+    );
+  }
+
   return { valid: errors.length === 0, errors };
 }
