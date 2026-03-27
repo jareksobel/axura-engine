@@ -8,6 +8,7 @@ export type ErrorCode =
   | 'CONFLICT'
   | 'BUSINESS_RULE_VIOLATION'
   | 'INTERNAL_ERROR'
+  | 'RATE_LIMITED'
   | 'VEHICLE_NOT_FOUND'
   | 'ASSESSMENT_NOT_FOUND'
   | 'POLICY_NOT_FOUND'
@@ -54,6 +55,17 @@ export function errorResponse(error: unknown): NextResponse<ErrorBody> {
   }
 
   console.error('Unexpected error:', error);
+
+  // Capture in Sentry when available (lazy import to avoid edge-runtime issues)
+  try {
+    // Dynamic require keeps this tree-shakeable and avoids crashing when
+    // @sentry/nextjs is not yet installed.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const Sentry = require('@sentry/nextjs') as typeof import('@sentry/nextjs');
+    Sentry.captureException(error);
+  } catch {
+    // Sentry not available — ignore
+  }
 
   return NextResponse.json(
     { error: { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred' } },
