@@ -4,6 +4,7 @@ import { getRequestContext } from '@/lib/auth/context';
 import { requirePermission, PERMISSIONS } from '@/lib/auth/permissions';
 import { errorResponse, ApiError } from '@/lib/errors';
 import { listVehicles, createVehicle, getVehicleByVin } from '@/lib/db/queries/vehicles';
+import { getUserByAuth0Sub } from '@/lib/db/queries/users';
 import { isValidVin, extractWmi, decodeVin } from '@/lib/vin/decoder';
 import { createLogger } from '@/lib/logger';
 
@@ -66,6 +67,9 @@ export async function POST(req: NextRequest) {
     const nhtsa = await decodeVin(vin);
     log.info('VIN decoded', { vin, make: nhtsa?.make, model: nhtsa?.model });
 
+    // Resolve the Axura staff user's DB UUID from their Auth0 sub
+    const registeredByUser = await getUserByAuth0Sub(ctx.sub).catch(() => null);
+
     const vehicle = await createVehicle({
       vin,
       wmi: extractWmi(vin),
@@ -75,7 +79,7 @@ export async function POST(req: NextRequest) {
       engine_type: nhtsa?.engine_type ?? null,
       fuel_type: nhtsa?.fuel_type ?? null,
       nhtsa_raw: nhtsa?.raw ?? null,
-      registered_by: ctx.sub,
+      registered_by: registeredByUser?.id ?? null,
     });
 
     return NextResponse.json({ data: vehicle }, { status: 201 });

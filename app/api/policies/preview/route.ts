@@ -6,9 +6,12 @@ import { errorResponse, ApiError } from '@/lib/errors';
 import { getAssessmentById } from '@/lib/db/queries/assessments';
 import { buildPremiumPreview } from '@/lib/pricing/calculator';
 
-const PreviewSchema = z.object({
-  assessment_id: z.string().uuid(),
-});
+const PreviewSchema = z.union([
+  z.object({ assessment_id: z.string().uuid() }),
+  z.object({ assessmentId:  z.string().uuid() }),
+]).transform((v) => ({
+  assessment_id: 'assessment_id' in v ? v.assessment_id : v.assessmentId,
+}));
 
 export async function POST(req: NextRequest) {
   try {
@@ -35,7 +38,11 @@ export async function POST(req: NextRequest) {
 
     const preview = buildPremiumPreview(assessmentMultiplier);
 
-    return NextResponse.json({ data: preview });
+    return NextResponse.json({
+      baseRate:             preview.base_rate_pln,
+      assessmentMultiplier: preview.assessment_multiplier,
+      tiers:                preview.tiers,
+    });
   } catch (err) {
     return errorResponse(err);
   }

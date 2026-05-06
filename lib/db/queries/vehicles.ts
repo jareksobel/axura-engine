@@ -43,8 +43,8 @@ export async function listVehicles(filter: ListVehiclesFilter = {}): Promise<{ d
     SELECT *
     FROM vehicles
     WHERE
-      (${filter.make ?? null} IS NULL OR make ILIKE ${filter.make ? `%${filter.make}%` : ''})
-      AND (${filter.model ?? null} IS NULL OR model ILIKE ${filter.model ? `%${filter.model}%` : ''})
+      (${filter.make ?? null}::text IS NULL OR make ILIKE ${filter.make ? `%${filter.make}%` : ''})
+      AND (${filter.model ?? null}::text IS NULL OR model ILIKE ${filter.model ? `%${filter.model}%` : ''})
     ORDER BY created_at DESC
     LIMIT ${limit} OFFSET ${offset}
   `;
@@ -53,8 +53,8 @@ export async function listVehicles(filter: ListVehiclesFilter = {}): Promise<{ d
     SELECT COUNT(*) AS total
     FROM vehicles
     WHERE
-      (${filter.make ?? null} IS NULL OR make ILIKE ${filter.make ? `%${filter.make}%` : ''})
-      AND (${filter.model ?? null} IS NULL OR model ILIKE ${filter.model ? `%${filter.model}%` : ''})
+      (${filter.make ?? null}::text IS NULL OR make ILIKE ${filter.make ? `%${filter.make}%` : ''})
+      AND (${filter.model ?? null}::text IS NULL OR model ILIKE ${filter.model ? `%${filter.model}%` : ''})
   `;
 
   return {
@@ -88,7 +88,7 @@ export async function createVehicle(input: CreateVehicleInput): Promise<VehicleR
       ${input.year ?? null},
       ${input.engine_type ?? null},
       ${input.fuel_type ?? null},
-      ${input.nhtsa_raw ? JSON.stringify(input.nhtsa_raw) : null},
+      ${input.nhtsa_raw ?? null},
       ${input.registered_by ?? null}
     )
     RETURNING *
@@ -107,7 +107,7 @@ export async function upsertVehicle(input: CreateVehicleInput): Promise<VehicleR
       ${input.year ?? null},
       ${input.engine_type ?? null},
       ${input.fuel_type ?? null},
-      ${input.nhtsa_raw ? JSON.stringify(input.nhtsa_raw) : null},
+      ${input.nhtsa_raw ?? null},
       ${input.registered_by ?? null}
     )
     ON CONFLICT (vin) DO UPDATE SET

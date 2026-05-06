@@ -58,9 +58,10 @@ export const RuleSetSchema = z.object({
     thresholds: AssessmentThresholdsSchema,
     scoring: z.object({
       categories: z.record(
+        z.string(),
         z.object({
           weight: z.number(),
-          rules: z.record(z.number()),
+          rules: z.record(z.string(), z.number()),
         }),
       ),
     }),
@@ -90,7 +91,7 @@ export function validateRuleSet(data: unknown): ValidationResult {
   if (!parseResult.success) {
     return {
       valid: false,
-      errors: parseResult.error.errors.map(e => `${e.path.join('.')}: ${e.message}`),
+      errors: parseResult.error.issues.map(e => `${e.path.join('.')}: ${e.message}`),
     };
   }
 

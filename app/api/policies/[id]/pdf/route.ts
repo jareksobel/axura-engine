@@ -10,7 +10,8 @@ import { createLogger } from '@/lib/logger';
 
 const log = createLogger('api.policies.pdf');
 
-const BUCKET = process.env.CLOUDFLARE_R2_BUCKET!;
+const BUCKET = process.env.CLOUDFLARE_R2_BUCKET;
+const R2_CONFIGURED = !!(BUCKET && process.env.CLOUDFLARE_R2_ENDPOINT);
 
 export async function GET(
   _req: NextRequest,
@@ -34,34 +35,41 @@ export async function GET(
       throw new ApiError(403, 'FORBIDDEN', 'Access denied to this policy');
     }
 
+    log.info('Generating policy PDF', { policyId: id, policyNumber: policy.policy_number, r2: R2_CONFIGURED });
+    const pdfBuffer = await generatePolicyPdf(policy);
+
+    // Local dev: R2 not configured — stream inline
+    if (!R2_CONFIGURED) {
+      return new NextResponse(new Uint8Array(pdfBuffer), {
+        headers: {
+          'Content-Type':        'application/pdf',
+          'Content-Disposition': `attachment; filename="polisa-${policy.policy_number}.pdf"`,
+        },
+      });
+    }
+
+    // Production: upload to R2 on first request, return presigned URL
     const r2Key = buildPolicyPdfKey(id);
 
-    // Generate PDF on first request and upload to R2
     if (!policy.pdf_r2_key) {
-      log.info('Generating policy PDF', { policyId: id, policyNumber: policy.policy_number });
-
-      const pdfBuffer = await generatePolicyPdf(policy);
-
       await r2.send(
         new PutObjectCommand({
-          Bucket:      BUCKET,
+          Bucket:      BUCKET!,
           Key:         r2Key,
           Body:        pdfBuffer,
           ContentType: 'application/pdf',
         }),
       );
-
       await setPolicyPdfKey(id, r2Key);
-
       log.info('Policy PDF uploaded to R2', { policyId: id, r2Key });
     }
 
-    const downloadUrl = await getPresignedDownloadUrl(r2Key, 3600);
+    const downloadUrl = await getPresignedDownloadUrl(policy.pdf_r2_key ?? r2Key, 3600);
 
     return NextResponse.json({
       data: {
         download_url:  downloadUrl,
-        r2_key:        r2Key,
+        r2_key:        policy.pdf_r2_key ?? r2Key,
         generated_at:  policy.pdf_generated_at ?? new Date().toISOString(),
         expires_in_s:  3600,
       },

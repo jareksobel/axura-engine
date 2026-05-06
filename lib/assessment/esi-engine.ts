@@ -364,7 +364,7 @@ export function toAssessmentResult(esi: EsiAssessmentResult, ruleSetVersion: str
     dtcs: esi.dtcs.map(d => ({
       code: d.code,
       status: d.status,
-      classification: d.classification === 'GREEN_ALLOWED' ? 'GREEN' : d.classification,
+      classification: d.classification === 'GREEN_ALLOWED' ? 'GREEN' : d.classification === 'AMBER_P1' ? 'AMBER' : d.classification,
       controller: d.controller,
     })),
     flags: {},

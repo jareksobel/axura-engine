@@ -6,13 +6,20 @@ import { createLogger } from '@/lib/logger';
 
 const log = createLogger('auth.middleware');
 
-const AUDIENCE   = process.env.AUTH0_AUDIENCE!;
-const ISSUER     = process.env.AUTH0_ISSUER_BASE_URL!;
-const JWKS_URI   = process.env.AUTH0_JWKS_URI ?? `${ISSUER}.well-known/jwks.json`;
-const CLAIMS_NS  = 'https://axura.pl/claims';
+const CLAIMS_NS = 'https://axura.pl/claims';
 
-// JWKS is fetched and cached automatically by `jose`
-const JWKS = createRemoteJWKSet(new URL(JWKS_URI));
+// Lazily initialised so a missing AUTH0_ISSUER_BASE_URL during local dev
+// (e.g. health checks) does not crash the proxy at module load time.
+let _jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
+
+function getJwks() {
+  if (!_jwks) {
+    const issuer  = process.env.AUTH0_ISSUER_BASE_URL!;
+    const jwksUri = process.env.AUTH0_JWKS_URI ?? `${issuer}.well-known/jwks.json`;
+    _jwks = createRemoteJWKSet(new URL(jwksUri));
+  }
+  return _jwks;
+}
 
 /**
  * Validates the Auth0 JWT Bearer token on a request and returns the request context.
@@ -29,9 +36,10 @@ export async function validateToken(request: NextRequest): Promise<RequestContex
 
   let payload;
   try {
-    const result = await jwtVerify(token, JWKS, {
-      audience: AUDIENCE,
-      issuer: ISSUER.endsWith('/') ? ISSUER : `${ISSUER}/`,
+    const issuer = process.env.AUTH0_ISSUER_BASE_URL!;
+    const result = await jwtVerify(token, getJwks(), {
+      audience: process.env.AUTH0_AUDIENCE!,
+      issuer: issuer.endsWith('/') ? issuer : `${issuer}/`,
     });
     payload = result.payload;
   } catch (err) {

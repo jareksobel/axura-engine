@@ -6,6 +6,7 @@ import {
   View,
   StyleSheet,
   renderToBuffer,
+  type DocumentProps,
 } from '@react-pdf/renderer';
 import type { PolicyRow } from '@/lib/db/queries/policies';
 
@@ -355,6 +356,6 @@ function PolicyDocument({ policy }: { policy: PolicyRow }) {
  */
 export async function generatePolicyPdf(policy: PolicyRow): Promise<Buffer> {
   const doc = React.createElement(PolicyDocument, { policy });
-  const buffer = await renderToBuffer(doc as React.ReactElement);
+  const buffer = await renderToBuffer(doc as React.ReactElement<DocumentProps>);
   return Buffer.from(buffer);
 }

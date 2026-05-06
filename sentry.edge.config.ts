@@ -1,12 +1,4 @@
-import * as Sentry from '@sentry/nextjs';
-
-Sentry.init({
-  dsn: process.env.SENTRY_DSN,
-
-  environment: process.env.SENTRY_ENVIRONMENT ?? process.env.NODE_ENV ?? 'development',
-  release:     process.env.SENTRY_RELEASE,
-
-  tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
-
-  enabled: Boolean(process.env.SENTRY_DSN),
-});
+// Edge runtime does not support @sentry/node (Node.js APIs unavailable).
+// Error capture in edge middleware is handled by the server-side Sentry init.
+// This file is a placeholder kept so instrumentation.ts compiles cleanly.
+export {};

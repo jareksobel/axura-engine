@@ -28,24 +28,55 @@ async function resolveDealerUser(
 
 // ── Schemas ───────────────────────────────────────────────────────────────────
 
-const CustomerSchema = z.object({
-  first_name: z.string().min(1),
-  last_name:  z.string().min(1),
-  pesel:      z.string().length(11).regex(/^\d{11}$/),
-  address:    z.string().min(1),
-  email:      z.email(),
-  phone:      z.string().length(9).regex(/^\d{9}$/),
-});
-
-const CreatePolicySchema = z.object({
-  assessment_id:        z.string().uuid(),
-  vin:                  z.string().length(17).toUpperCase(),
-  odo_at_policy_km:     z.number().int().positive(),
-  license_plate:        z.string().optional(),
-  annual_mileage_tier:  z.enum(['low', 'mid', 'high']),
-  start_date:           z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  customer:             CustomerSchema,
-});
+const CreatePolicySchema = z.union([
+  // camelCase flat (Showroom format)
+  z.object({
+    assessmentId:       z.string().uuid(),
+    vin:                z.string().length(17).toUpperCase(),
+    odoPolicyKm:        z.number().int().positive(),
+    licensePlate:       z.string().optional(),
+    annualMileageTier:  z.enum(['low', 'mid', 'high']),
+    startDate:          z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    customerFirstName:  z.string().min(1),
+    customerLastName:   z.string().min(1),
+    customerPesel:      z.string().length(11).regex(/^\d{11}$/),
+    customerAddress:    z.string().min(1),
+    customerEmail:      z.email(),
+    customerPhone:      z.string().length(9).regex(/^\d{9}$/),
+  }).transform((v) => ({
+    assessment_id:       v.assessmentId,
+    vin:                 v.vin,
+    odo_at_policy_km:    v.odoPolicyKm,
+    license_plate:       v.licensePlate,
+    annual_mileage_tier: v.annualMileageTier,
+    start_date:          v.startDate,
+    customer: {
+      first_name: v.customerFirstName,
+      last_name:  v.customerLastName,
+      pesel:      v.customerPesel,
+      address:    v.customerAddress,
+      email:      v.customerEmail,
+      phone:      v.customerPhone,
+    },
+  })),
+  // snake_case nested (original / Command format)
+  z.object({
+    assessment_id:        z.string().uuid(),
+    vin:                  z.string().length(17).toUpperCase(),
+    odo_at_policy_km:     z.number().int().positive(),
+    license_plate:        z.string().optional(),
+    annual_mileage_tier:  z.enum(['low', 'mid', 'high']),
+    start_date:           z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    customer: z.object({
+      first_name: z.string().min(1),
+      last_name:  z.string().min(1),
+      pesel:      z.string().length(11).regex(/^\d{11}$/),
+      address:    z.string().min(1),
+      email:      z.email(),
+      phone:      z.string().length(9).regex(/^\d{9}$/),
+    }),
+  }),
+]);
 
 // ── GET /api/policies ─────────────────────────────────────────────────────────
 
@@ -63,10 +94,27 @@ export async function GET(req: NextRequest) {
     // Dealer users can only see their own dealer's policies
     const dealerId = ctx.dealerId ?? searchParams.get('dealer_id') ?? undefined;
 
-    const { data, total } = await listPolicies({ page, limit, vin, status, dealerId });
+    const { data: rows, total } = await listPolicies({ page, limit, vin, status, dealerId });
+
+    const items = rows.map((p) => ({
+      id:                p.id,
+      policyNumber:      p.policy_number,
+      vin:               p.vin,
+      make:              p.make,
+      model:             p.model,
+      year:              p.year,
+      customerFirstName: p.customer_first_name,
+      customerLastName:  p.customer_last_name,
+      premiumGrossPln:   parseFloat(p.premium_gross_pln),
+      status:            p.status,
+      odoDeltaFlag:      p.odo_delta_flag,
+      startDate:         p.start_date,
+      endDate:           p.end_date,
+      createdAt:         p.created_at,
+    }));
 
     return NextResponse.json({
-      data,
+      data: items,
       total,
       page,
       limit,
@@ -189,15 +237,13 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(
       {
-        data: {
-          id:               policyId,
-          policy_number:    policyNumber,
-          status:           'pending_payment',
-          premium_gross_pln: premium.premium_gross_pln,
-          start_date,
-          end_date,
-          odo_delta_flag:   odoDeltaFlag,
-        },
+        id:              policyId,
+        policyNumber:    policyNumber,
+        status:          'pending_payment',
+        premiumGrossPln: premium.premium_gross_pln,
+        startDate:       start_date,
+        endDate:         end_date,
+        odoDeltaFlag:    odoDeltaFlag,
       },
       { status: 201 },
     );

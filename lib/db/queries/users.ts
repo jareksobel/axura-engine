@@ -140,7 +140,7 @@ export async function getUserEffectivePermissions(userId: string): Promise<strin
     )
     ORDER BY p.code
   `;
-  return rows.map((r: { code: string }) => r.code);
+  return (rows as { code: string }[]).map(r => r.code);
 }
 
 export interface DirectPermissionRow {

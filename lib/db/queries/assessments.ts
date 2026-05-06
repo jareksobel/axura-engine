@@ -88,10 +88,10 @@ export async function listAssessments(filter: ListAssessmentsFilter = {}): Promi
   const rows = await sql`
     SELECT * FROM vehicle_assessments
     WHERE
-      (${filter.vehicleId ?? null} IS NULL OR vehicle_id = ${filter.vehicleId ?? null})
-      AND (${filter.vin ?? null} IS NULL OR vin = ${filter.vin ? filter.vin.toUpperCase() : null})
-      AND (${filter.verdict ?? null} IS NULL OR verdict = ${filter.verdict ?? null})
-      AND (${filter.source ?? null} IS NULL OR source = ${filter.source ?? null})
+      (${filter.vehicleId ?? null}::text IS NULL OR vehicle_id = ${filter.vehicleId ?? null}::uuid)
+      AND (${filter.vin ?? null}::text IS NULL OR vin = ${filter.vin ? filter.vin.toUpperCase() : null})
+      AND (${filter.verdict ?? null}::text IS NULL OR verdict = ${filter.verdict ?? null})
+      AND (${filter.source ?? null}::text IS NULL OR source = ${filter.source ?? null})
     ORDER BY created_at DESC
     LIMIT ${limit} OFFSET ${offset}
   `;
@@ -99,10 +99,10 @@ export async function listAssessments(filter: ListAssessmentsFilter = {}): Promi
   const countRows = await sql`
     SELECT COUNT(*) AS total FROM vehicle_assessments
     WHERE
-      (${filter.vehicleId ?? null} IS NULL OR vehicle_id = ${filter.vehicleId ?? null})
-      AND (${filter.vin ?? null} IS NULL OR vin = ${filter.vin ? filter.vin.toUpperCase() : null})
-      AND (${filter.verdict ?? null} IS NULL OR verdict = ${filter.verdict ?? null})
-      AND (${filter.source ?? null} IS NULL OR source = ${filter.source ?? null})
+      (${filter.vehicleId ?? null}::text IS NULL OR vehicle_id = ${filter.vehicleId ?? null}::uuid)
+      AND (${filter.vin ?? null}::text IS NULL OR vin = ${filter.vin ? filter.vin.toUpperCase() : null})
+      AND (${filter.verdict ?? null}::text IS NULL OR verdict = ${filter.verdict ?? null})
+      AND (${filter.source ?? null}::text IS NULL OR source = ${filter.source ?? null})
   `;
 
   return {

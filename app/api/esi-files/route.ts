@@ -3,8 +3,30 @@ import { z } from 'zod';
 import { getRequestContext } from '@/lib/auth/context';
 import { requirePermission, PERMISSIONS } from '@/lib/auth/permissions';
 import { errorResponse, ApiError } from '@/lib/errors';
-import { createEsiFile } from '@/lib/db/queries/esi-files';
+import { createEsiFile, listEsiFilesByVehicle } from '@/lib/db/queries/esi-files';
 import { getVehicleByVin } from '@/lib/db/queries/vehicles';
+
+export async function GET(req: NextRequest) {
+  try {
+    const ctx = await getRequestContext();
+    requirePermission(ctx, PERMISSIONS.VEHICLE_READ);
+
+    const vin = req.nextUrl.searchParams.get('vin');
+    if (!vin) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'vin query parameter is required');
+    }
+
+    const vehicle = await getVehicleByVin(vin.toUpperCase());
+    if (!vehicle) {
+      throw new ApiError(404, 'VEHICLE_NOT_FOUND', `Vehicle ${vin} not found`);
+    }
+
+    const files = await listEsiFilesByVehicle(vehicle.id);
+    return NextResponse.json(files);
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
 
 const RegisterEsiFileSchema = z.object({
   r2_key: z.string().min(1),

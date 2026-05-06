@@ -154,10 +154,10 @@ export async function listPolicies(
   const rows = await sql`
     SELECT * FROM policies
     WHERE
-      (${filter.dealerId ?? null} IS NULL OR dealer_id = ${filter.dealerId ?? null})
-      AND (${filter.vin ?? null} IS NULL OR vin = ${filter.vin ? filter.vin.toUpperCase() : null})
-      AND (${filter.status ?? null} IS NULL OR status = ${filter.status ?? null})
-      AND (${filter.customerPesel ?? null} IS NULL OR customer_pesel = ${filter.customerPesel ?? null})
+      (${filter.dealerId ?? null}::text IS NULL OR dealer_id = ${filter.dealerId ?? null}::uuid)
+      AND (${filter.vin ?? null}::text IS NULL OR vin = ${filter.vin ? filter.vin.toUpperCase() : null})
+      AND (${filter.status ?? null}::text IS NULL OR status = ${filter.status ?? null})
+      AND (${filter.customerPesel ?? null}::text IS NULL OR customer_pesel = ${filter.customerPesel ?? null})
     ORDER BY created_at DESC
     LIMIT ${limit} OFFSET ${offset}
   `;
@@ -165,10 +165,10 @@ export async function listPolicies(
   const countRows = await sql`
     SELECT COUNT(*) AS total FROM policies
     WHERE
-      (${filter.dealerId ?? null} IS NULL OR dealer_id = ${filter.dealerId ?? null})
-      AND (${filter.vin ?? null} IS NULL OR vin = ${filter.vin ? filter.vin.toUpperCase() : null})
-      AND (${filter.status ?? null} IS NULL OR status = ${filter.status ?? null})
-      AND (${filter.customerPesel ?? null} IS NULL OR customer_pesel = ${filter.customerPesel ?? null})
+      (${filter.dealerId ?? null}::text IS NULL OR dealer_id = ${filter.dealerId ?? null}::uuid)
+      AND (${filter.vin ?? null}::text IS NULL OR vin = ${filter.vin ? filter.vin.toUpperCase() : null})
+      AND (${filter.status ?? null}::text IS NULL OR status = ${filter.status ?? null})
+      AND (${filter.customerPesel ?? null}::text IS NULL OR customer_pesel = ${filter.customerPesel ?? null})
   `;
 
   return {

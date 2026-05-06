@@ -1,7 +1,15 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import { validateToken } from '@/lib/auth/middleware';
 import { errorResponse } from '@/lib/errors';
+import type { RequestContext } from '@/lib/types';
 import { checkRateLimit } from '@/lib/rate-limit';
+import { PERMISSIONS } from '@/lib/auth/permissions';
+import { createLogger } from '@/lib/logger';
+
+const isSkipAuth =
+  process.env.SKIP_AUTH === 'true' && process.env.NODE_ENV !== 'production';
+
+const log = createLogger('proxy');
 
 // ---------------------------------------------------------------------------
 // CORS helpers
@@ -28,10 +36,10 @@ function corsHeaders(origin: string | null): HeadersInit {
 }
 
 // ---------------------------------------------------------------------------
-// Middleware
+// Proxy (Next.js 16 renamed "middleware" → "proxy")
 // ---------------------------------------------------------------------------
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const origin = request.headers.get('origin');
 
   // Handle CORS pre-flight
@@ -53,6 +61,7 @@ export async function middleware(request: NextRequest) {
 
   const rl = checkRateLimit(ip);
   if (!rl.ok) {
+    log.warn('Rate limit exceeded', { ip, retryAfter: rl.retryAfter, pathname });
     return new NextResponse(
       JSON.stringify({ error: { code: 'RATE_LIMITED', message: 'Too many requests' } }),
       {
@@ -68,7 +77,9 @@ export async function middleware(request: NextRequest) {
 
   // Auth validation
   try {
-    const ctx = await validateToken(request);
+    const ctx: RequestContext = isSkipAuth
+      ? { sub: 'dev|mock-admin', permissions: Object.values(PERMISSIONS) }
+      : await validateToken(request);
 
     const requestHeaders = new Headers(request.headers);
     requestHeaders.set('x-auth-sub',         ctx.sub);
@@ -86,10 +97,11 @@ export async function middleware(request: NextRequest) {
 
     return response;
   } catch (error) {
+    log.warn('Auth rejected', { ip, pathname, error: error instanceof Error ? error.message : String(error) });
     return errorResponse(error);
   }
 }
 
 export const config = {
-  matcher: '/api/:path*',
+  matcher: ['/api/:path*'],
 };

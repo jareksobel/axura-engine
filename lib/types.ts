@@ -37,7 +37,7 @@ export interface PaginatedResult<T> {
 
 export interface DtcEntry {
   code: string;
-  status: 'active' | 'stored' | 'static' | 'confirmed' | 'permanent';
+  status: 'active' | 'stored' | 'static' | 'confirmed' | 'permanent' | 'unknown';
   description?: string;
   classification?: 'RED' | 'AMBER' | 'GREEN' | 'UNKNOWN';
   controller?: string;

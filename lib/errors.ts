@@ -1,4 +1,7 @@
 import { NextResponse } from 'next/server';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('api.errors');
 
 export type ErrorCode =
   | 'VALIDATION_ERROR'
@@ -48,20 +51,23 @@ interface ErrorBody {
 
 export function errorResponse(error: unknown): NextResponse<ErrorBody> {
   if (error instanceof ApiError) {
+    const meta = { status: error.status, code: error.code, message: error.message, details: error.details };
+    if (error.status >= 500) {
+      log.error('API error', meta);
+    } else {
+      log.warn('Client error', meta);
+    }
     return NextResponse.json(
       { error: { code: error.code, message: error.message, details: error.details } },
       { status: error.status },
     );
   }
 
-  console.error('Unexpected error:', error);
+  log.error('Unexpected error', error instanceof Error ? error : { raw: String(error) });
 
-  // Capture in Sentry when available (lazy import to avoid edge-runtime issues)
   try {
-    // Dynamic require keeps this tree-shakeable and avoids crashing when
-    // @sentry/nextjs is not yet installed.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const Sentry = require('@sentry/nextjs') as typeof import('@sentry/nextjs');
+    const Sentry = require('@sentry/node') as typeof import('@sentry/node');
     Sentry.captureException(error);
   } catch {
     // Sentry not available — ignore
