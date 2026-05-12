@@ -11,6 +11,9 @@ export interface VehicleRow {
   fuel_type: string | null;
   nhtsa_raw: Record<string, unknown> | null;
   registered_by: string | null;
+  registered_by_name?: string | null;
+  latest_verdict?: string | null;
+  latest_assessment_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -40,12 +43,21 @@ export async function listVehicles(filter: ListVehiclesFilter = {}): Promise<{ d
   const offset = (page - 1) * limit;
 
   const rows = await sql`
-    SELECT *
-    FROM vehicles
+    SELECT v.*,
+           la.verdict       AS latest_verdict,
+           la.created_at    AS latest_assessment_at
+    FROM vehicles v
+    LEFT JOIN LATERAL (
+      SELECT verdict, created_at
+      FROM vehicle_assessments
+      WHERE vehicle_id = v.id
+      ORDER BY created_at DESC
+      LIMIT 1
+    ) la ON true
     WHERE
-      (${filter.make ?? null}::text IS NULL OR make ILIKE ${filter.make ? `%${filter.make}%` : ''})
-      AND (${filter.model ?? null}::text IS NULL OR model ILIKE ${filter.model ? `%${filter.model}%` : ''})
-    ORDER BY created_at DESC
+      (${filter.make ?? null}::text IS NULL OR v.make ILIKE ${filter.make ? `%${filter.make}%` : ''})
+      AND (${filter.model ?? null}::text IS NULL OR v.model ILIKE ${filter.model ? `%${filter.model}%` : ''})
+    ORDER BY v.created_at DESC
     LIMIT ${limit} OFFSET ${offset}
   `;
 
@@ -65,7 +77,11 @@ export async function listVehicles(filter: ListVehiclesFilter = {}): Promise<{ d
 
 export async function getVehicleByVin(vin: string): Promise<VehicleRow | null> {
   const rows = await sql`
-    SELECT * FROM vehicles WHERE vin = ${vin.toUpperCase()} LIMIT 1
+    SELECT v.*, u.full_name AS registered_by_name
+    FROM vehicles v
+    LEFT JOIN users u ON u.id = v.registered_by
+    WHERE v.vin = ${vin.toUpperCase()}
+    LIMIT 1
   `;
   return (rows[0] as VehicleRow) ?? null;
 }
