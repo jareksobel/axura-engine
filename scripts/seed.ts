@@ -3,7 +3,10 @@
  *
  * Usage:  npm run seed
  *
- * Idempotent: skips inserts that would violate UNIQUE constraints (ON CONFLICT DO NOTHING).
+ * Idempotent:
+ *   - assessments: keyed by payload->>'seed_ref'
+ *   - esi_files:   keyed by r2_key (UNIQUE)
+ *   - all other tables: ON CONFLICT DO NOTHING / DO UPDATE
  * Safe to run multiple times.
  */
 
@@ -16,13 +19,91 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function nip(base: string) {
-  // Polish NIP: 10 digits
   return base.padEnd(10, '0').slice(0, 10);
 }
 
 function pesel(base: string) {
-  // Polish PESEL: 11 digits
   return base.padEnd(11, '0').slice(0, 11);
+}
+
+// ── ESI inspection group definitions ──────────────────────────────────────────
+
+type ItemVerdict = 'ok' | 'nok' | 'na';
+
+interface CheckItem  { label: string; v: ItemVerdict; note: string; }
+interface CheckGroup { id: string; label: string; items: CheckItem[]; }
+
+const ENGINE_OK: CheckItem[] = [
+  { label: 'Stan ogólny silnika',           v: 'ok', note: '' },
+  { label: 'Poziom i jakość oleju',         v: 'ok', note: '' },
+  { label: 'Układ chłodzenia i chłodnica',  v: 'ok', note: '' },
+  { label: 'Skrzynia biegów / przekładnia', v: 'ok', note: '' },
+  { label: 'Układ wydechowy',               v: 'na', note: '' },
+];
+
+const ENGINE_NOK: CheckItem[] = [
+  { label: 'Stan ogólny silnika',           v: 'ok',  note: '' },
+  { label: 'Poziom i jakość oleju',         v: 'ok',  note: '' },
+  { label: 'Układ chłodzenia i chłodnica',  v: 'nok', note: 'Widoczny wyciek przy górnym wężu chłodnicy. Wymaga wymiany.' },
+  { label: 'Skrzynia biegów / przekładnia', v: 'ok',  note: '' },
+  { label: 'Układ wydechowy',               v: 'na',  note: '' },
+];
+
+const BRAKES_OK: CheckItem[] = [
+  { label: 'Klocki hamulcowe — przód',      v: 'ok', note: '' },
+  { label: 'Klocki hamulcowe — tył',        v: 'ok', note: '' },
+  { label: 'Tarcze hamulcowe',              v: 'ok', note: '' },
+  { label: 'Poziom płynu hamulcowego',      v: 'ok', note: '' },
+  { label: 'Hamulec awaryjny / postojowy',  v: 'ok', note: '' },
+];
+
+const SUSPENSION_OK: CheckItem[] = [
+  { label: 'Amortyzatory przednie',              v: 'ok', note: '' },
+  { label: 'Amortyzatory tylne',                 v: 'ok', note: '' },
+  { label: 'Drążki kierownicze i przeguby',      v: 'ok', note: '' },
+  { label: 'Łożyska kół',                        v: 'ok', note: '' },
+  { label: 'Zbieżność i geometria kół',          v: 'na', note: '' },
+];
+
+const SUSPENSION_NOK: CheckItem[] = [
+  { label: 'Amortyzatory przednie',              v: 'ok',  note: '' },
+  { label: 'Amortyzatory tylne',                 v: 'nok', note: 'Prawy amortyzator tylny — wyciek oleju. Kwalifikuje się do wymiany.' },
+  { label: 'Drążki kierownicze i przeguby',      v: 'ok',  note: '' },
+  { label: 'Łożyska kół',                        v: 'ok',  note: '' },
+  { label: 'Zbieżność i geometria kół',          v: 'na',  note: '' },
+];
+
+const ELECTRIC_OK: CheckItem[] = [
+  { label: 'Stan i napięcie akumulatora',  v: 'ok', note: '' },
+  { label: 'Alternator',                   v: 'ok', note: '' },
+  { label: 'Światła główne i DRL',         v: 'ok', note: '' },
+  { label: 'Światła tylne i stop',         v: 'ok', note: '' },
+  { label: 'Kierunkowskazy i awaryjne',    v: 'ok', note: '' },
+];
+
+const BODY_OK: CheckItem[] = [
+  { label: 'Lakier — korozja i uszkodzenia', v: 'ok', note: '' },
+  { label: 'Szyba przednia',                v: 'ok', note: '' },
+  { label: 'Szyby boczne i tylna',          v: 'ok', note: '' },
+  { label: 'Drzwi, zamki i zawiasy',        v: 'ok', note: '' },
+  { label: 'Progi i elementy podwozia',     v: 'ok', note: '' },
+];
+
+function makeGroups(eng: CheckItem[], susp: CheckItem[]): CheckGroup[] {
+  return [
+    { id: 'engine',     label: 'Silnik i napęd',                 items: eng      },
+    { id: 'brakes',     label: 'Układ hamulcowy',                items: BRAKES_OK },
+    { id: 'suspension', label: 'Zawieszenie i układ kierowniczy', items: susp     },
+    { id: 'electric',   label: 'Elektrika i oświetlenie',        items: ELECTRIC_OK },
+    { id: 'body',       label: 'Nadwozie i szyby',               items: BODY_OK  },
+  ];
+}
+
+const GROUPS_CLEAN = makeGroups(ENGINE_OK,  SUSPENSION_OK);
+const GROUPS_NOK   = makeGroups(ENGINE_NOK, SUSPENSION_NOK);
+
+function esiPayload(type: string, photoCount: number, groups: CheckGroup[], extra?: object) {
+  return { type, photo_count: photoCount, groups, ...extra };
 }
 
 // ── Static fake data ───────────────────────────────────────────────────────────
@@ -148,7 +229,32 @@ const VEHICLES = [
   },
 ];
 
+// ── ESI PDF files ──────────────────────────────────────────────────────────────
+// Inserted before assessments; IDs are used in esi_file_id on vehicle_assessments.
+
+const ESI_PDFS = [
+  // VW Golf — two inspections (RED initial, GREEN after repair)
+  { vehicleIndex: 0, filename: 'bosch_VW001.pdf',     size_bytes: 2_516_582, r2_key: 'esi/WVWZZZ1KZ8W412345/bosch_VW001.pdf' },
+  { vehicleIndex: 0, filename: 'bosch_VW002.pdf',     size_bytes: 1_782_579, r2_key: 'esi/WVWZZZ1KZ8W412345/bosch_VW002.pdf' },
+  // BMW
+  { vehicleIndex: 1, filename: 'bosch_BMW001.pdf',    size_bytes: 2_411_724, r2_key: 'esi/WBA3A5G5XDNP12345/bosch_BMW001.pdf' },
+  // Škoda
+  { vehicleIndex: 2, filename: 'bosch_SKODA001.pdf',  size_bytes: 1_993_523, r2_key: 'esi/TMBZZZ3VZ9P567890/bosch_SKODA001.pdf' },
+  // Ford Focus
+  { vehicleIndex: 3, filename: 'bosch_FORD001.pdf',   size_bytes: 2_203_648, r2_key: 'esi/WF0FXXGBHFKY12345/bosch_FORD001.pdf' },
+  // Toyota Prius
+  { vehicleIndex: 4, filename: 'bosch_TOYOTA001.pdf', size_bytes: 1_887_437, r2_key: 'esi/JTDKN3DU0A0234567/bosch_TOYOTA001.pdf' },
+  // Opel Astra
+  { vehicleIndex: 5, filename: 'bosch_OPEL001.pdf',   size_bytes: 2_097_152, r2_key: 'esi/W0L000000N8012345/bosch_OPEL001.pdf' },
+];
+
+// ── Assessments ────────────────────────────────────────────────────────────────
+// Idempotency: payload->>'seed_ref' is used as the unique key.
+// Indices [0], [3], [6] are referenced by POLICIES — do not reorder.
+
 const ASSESSMENTS = [
+  // ─── VW Golf ────────────────────────────────────────────────────────────────
+  // [0] ESI GREEN "Po naprawie" (15.04.2026) — referenced by POLICIES[0]
   {
     vehicleIndex: 0,
     source: 'esi' as const,
@@ -156,19 +262,48 @@ const ASSESSMENTS = [
     score_pct: 87.5,
     rate_action: 'BIND' as const,
     assessment_multiplier: 1.0,
-    reason: 'All major systems nominal. No fault codes. Engine compression within spec.',
-    payload: { dtcs: [], systems: { engine: 'OK', transmission: 'OK', brakes: 'OK' } },
+    reason: 'Naprawa chłodnicy i amortyzatora potwierdzona. Pojazd dopuszczony do ubezpieczenia.',
+    technician_note: 'Naprawa chłodnicy i amortyzatora potwierdzona. Pojazd dopuszczony do ubezpieczenia.',
+    esiPdfKey: 'esi/WVWZZZ1KZ8W412345/bosch_VW002.pdf',
+    seedRef: 'esi-vw-green',
+    created_at: '2026-04-15T10:23:00Z',
+    payload: esiPayload('Po naprawie', 4, GROUPS_CLEAN, { seed_ref: 'esi-vw-green' }),
   },
+  // [1] OBD GREEN (historical pre-ESI scan)
+  {
+    vehicleIndex: 0,
+    source: 'obd' as const,
+    verdict: 'GREEN' as const,
+    score_pct: 78.0,
+    rate_action: 'BIND' as const,
+    assessment_multiplier: 1.0,
+    reason: 'No active fault codes detected. All readiness monitors complete.',
+    technician_note: null,
+    esiPdfKey: null,
+    seedRef: 'obd-vw-green',
+    created_at: null,
+    payload: { dtcs: [], systems: { engine: 'OK', transmission: 'OK', brakes: 'OK' }, seed_ref: 'obd-vw-green' },
+  },
+
+  // ─── BMW 3 Series ────────────────────────────────────────────────────────────
+  // [2] OBD RED (historical — critical DTC scan)
   {
     vehicleIndex: 1,
-    source: 'esi' as const,
-    verdict: 'AMBER' as const,
-    score_pct: 61.0,
-    rate_action: 'HARD_INSPECTION' as const,
-    assessment_multiplier: 1.25,
-    reason: 'Minor DTC P0300 (random misfire) detected. Recommend physical inspection before binding.',
-    payload: { dtcs: ['P0300'], systems: { engine: 'WARN', transmission: 'OK', brakes: 'OK' } },
+    source: 'obd' as const,
+    verdict: 'RED' as const,
+    score_pct: 32.0,
+    rate_action: 'DECLINE' as const,
+    assessment_multiplier: 0,
+    reason: 'Critical DTC P0016 (crankshaft/camshaft correlation). Significant engine damage risk.',
+    technician_note: null,
+    esiPdfKey: null,
+    seedRef: 'obd-bmw-red',
+    created_at: null,
+    payload: { dtcs: ['P0016', 'P0562'], systems: { engine: 'FAIL', transmission: 'WARN', brakes: 'OK' }, seed_ref: 'obd-bmw-red' },
   },
+
+  // ─── Škoda Octavia ──────────────────────────────────────────────────────────
+  // [3] ESI GREEN "Rejestracja" (17.04.2026) — referenced by POLICIES[1]
   {
     vehicleIndex: 2,
     source: 'esi' as const,
@@ -177,8 +312,30 @@ const ASSESSMENTS = [
     rate_action: 'BIND' as const,
     assessment_multiplier: 0.95,
     reason: 'Clean report. All systems within manufacturer tolerances. Low mileage for age.',
-    payload: { dtcs: [], systems: { engine: 'OK', transmission: 'OK', brakes: 'OK', abs: 'OK' } },
+    technician_note: 'Stan bardzo dobry. Brak usterek widocznych.',
+    esiPdfKey: 'esi/TMBZZZ3VZ9P567890/bosch_SKODA001.pdf',
+    seedRef: 'esi-skoda-green',
+    created_at: '2026-04-17T09:45:00Z',
+    payload: esiPayload('Rejestracja', 6, GROUPS_CLEAN, { seed_ref: 'esi-skoda-green' }),
   },
+  // [4] OBD GREEN (historical)
+  {
+    vehicleIndex: 2,
+    source: 'obd' as const,
+    verdict: 'GREEN' as const,
+    score_pct: 85.0,
+    rate_action: 'BIND' as const,
+    assessment_multiplier: 1.0,
+    reason: 'No active DTCs. All readiness monitors complete. Engine running within normal parameters.',
+    technician_note: null,
+    esiPdfKey: null,
+    seedRef: 'obd-skoda-green',
+    created_at: null,
+    payload: { dtcs: [], systems: { engine: 'OK', transmission: 'OK', brakes: 'OK' }, seed_ref: 'obd-skoda-green' },
+  },
+
+  // ─── Ford Focus ─────────────────────────────────────────────────────────────
+  // [5] OBD RED (historical DTC scan)
   {
     vehicleIndex: 3,
     source: 'obd' as const,
@@ -187,8 +344,15 @@ const ASSESSMENTS = [
     rate_action: 'DECLINE' as const,
     assessment_multiplier: 0,
     reason: 'Critical DTC P0016 (crankshaft/camshaft correlation). Engine damage risk. Policy declined.',
-    payload: { dtcs: ['P0016', 'P0340'], systems: { engine: 'FAIL', transmission: 'WARN', brakes: 'OK' } },
+    technician_note: null,
+    esiPdfKey: null,
+    seedRef: 'obd-ford-red',
+    created_at: null,
+    payload: { dtcs: ['P0016', 'P0340'], systems: { engine: 'FAIL', transmission: 'WARN', brakes: 'OK' }, seed_ref: 'obd-ford-red' },
   },
+
+  // ─── Toyota Prius ───────────────────────────────────────────────────────────
+  // [6] ESI GREEN "Rejestracja" (17.04.2026) — referenced by POLICIES[2]
   {
     vehicleIndex: 4,
     source: 'esi' as const,
@@ -197,15 +361,102 @@ const ASSESSMENTS = [
     rate_action: 'BIND' as const,
     assessment_multiplier: 0.9,
     reason: 'HEV system fully operational. Battery health 94%. No fault codes present.',
-    payload: { dtcs: [], systems: { engine: 'OK', hev_battery: 'OK', transmission: 'OK', brakes: 'OK' } },
+    technician_note: 'Układ HEV w pełni sprawny. Pojazd w bardzo dobrym stanie.',
+    esiPdfKey: 'esi/JTDKN3DU0A0234567/bosch_TOYOTA001.pdf',
+    seedRef: 'esi-toyota-green',
+    created_at: '2026-04-17T11:30:00Z',
+    payload: esiPayload('Rejestracja', 5, GROUPS_CLEAN, { hev_battery_health_pct: 94, seed_ref: 'esi-toyota-green' }),
+  },
+  // [7] OBD GREEN (historical)
+  {
+    vehicleIndex: 4,
+    source: 'obd' as const,
+    verdict: 'GREEN' as const,
+    score_pct: 89.0,
+    rate_action: 'BIND' as const,
+    assessment_multiplier: 0.95,
+    reason: 'HEV battery monitoring nominal. No active DTCs. All readiness monitors complete.',
+    technician_note: null,
+    esiPdfKey: null,
+    seedRef: 'obd-toyota-green',
+    created_at: null,
+    payload: { dtcs: [], systems: { engine: 'OK', hev_battery: 'OK', transmission: 'OK', brakes: 'OK' }, seed_ref: 'obd-toyota-green' },
+  },
+
+  // ─── Opel Astra ─────────────────────────────────────────────────────────────
+  // [8] ESI GREEN "Rejestracja" (17.04.2026)
+  {
+    vehicleIndex: 5,
+    source: 'esi' as const,
+    verdict: 'GREEN' as const,
+    score_pct: 83.0,
+    rate_action: 'BIND' as const,
+    assessment_multiplier: 1.0,
+    reason: 'Satisfactory condition. Minor cosmetic wear noted. All mechanical systems operational.',
+    technician_note: 'Drobne ślady użytkowania. Wszystkie systemy sprawne.',
+    esiPdfKey: 'esi/W0L000000N8012345/bosch_OPEL001.pdf',
+    seedRef: 'esi-opel-green',
+    created_at: '2026-04-17T14:00:00Z',
+    payload: esiPayload('Rejestracja', 6, GROUPS_CLEAN, { seed_ref: 'esi-opel-green' }),
+  },
+
+  // ─── VW Golf — initial RED inspection (before repair) ────────────────────────
+  // [9] ESI RED "Rejestracja" (10.01.2026) — historical, no policy
+  {
+    vehicleIndex: 0,
+    source: 'esi' as const,
+    verdict: 'RED' as const,
+    score_pct: 41.0,
+    rate_action: 'DECLINE' as const,
+    assessment_multiplier: 0,
+    reason: '2 odchylenia NOK: wyciek chłodnicy oraz wyciek oleju amortyzatora tylnego. Wymaga naprawy.',
+    technician_note: 'Wymaga naprawy przed ponownym sprawdzeniem.',
+    esiPdfKey: 'esi/WVWZZZ1KZ8W412345/bosch_VW001.pdf',
+    seedRef: 'esi-vw-red',
+    created_at: '2026-01-10T09:00:00Z',
+    payload: esiPayload('Rejestracja', 6, GROUPS_NOK, { seed_ref: 'esi-vw-red' }),
+  },
+
+  // ─── BMW 3 Series — ESI GREEN (Rejestracja) ──────────────────────────────────
+  // [10] ESI GREEN "Rejestracja" (16.04.2026) — follows the historical OBD RED [2]
+  {
+    vehicleIndex: 1,
+    source: 'esi' as const,
+    verdict: 'GREEN' as const,
+    score_pct: 88.0,
+    rate_action: 'BIND' as const,
+    assessment_multiplier: 1.0,
+    reason: 'All systems within specification. No fault codes. Vehicle in good condition.',
+    technician_note: null,
+    esiPdfKey: 'esi/WBA3A5G5XDNP12345/bosch_BMW001.pdf',
+    seedRef: 'esi-bmw-green',
+    created_at: '2026-04-16T13:15:00Z',
+    payload: esiPayload('Rejestracja', 6, GROUPS_CLEAN, { seed_ref: 'esi-bmw-green' }),
+  },
+
+  // ─── Ford Focus — ESI RED "Rejestracja" ──────────────────────────────────────
+  // [11] ESI RED "Rejestracja" (17.04.2026) — matches the screenshot UI
+  {
+    vehicleIndex: 3,
+    source: 'esi' as const,
+    verdict: 'RED' as const,
+    score_pct: 39.0,
+    rate_action: 'DECLINE' as const,
+    assessment_multiplier: 0,
+    reason: '2 odchylenia NOK: wyciek chłodnicy oraz wyciek oleju amortyzatora tylnego. Pojazd odrzucony.',
+    technician_note: 'Poważne usterki — wymagana naprawa przed ponownym sprawdzeniem.',
+    esiPdfKey: 'esi/WF0FXXGBHFKY12345/bosch_FORD001.pdf',
+    seedRef: 'esi-ford-red',
+    created_at: '2026-04-17T15:45:00Z',
+    payload: esiPayload('Rejestracja', 6, GROUPS_NOK, { seed_ref: 'esi-ford-red' }),
   },
 ];
 
 const POLICIES = [
   {
-    policyNumber: 'AX-2025-0001',
+    policyNumber: 'AX-2026-0001',
     vehicleIndex: 0,
-    assessmentIndex: 0,
+    assessmentIndex: 0,   // VW Golf ESI GREEN [0]
     dealerIndex: 0,
     dealerUserIndex: 0,
     customer: {
@@ -224,13 +475,13 @@ const POLICIES = [
     mileage_multiplier: 1.1,
     status: 'active' as const,
     payment_status: 'paid' as const,
-    start_date: '2025-03-01',
-    end_date: '2026-03-01',
+    start_date: '2026-04-16',
+    end_date: '2027-04-16',
   },
   {
-    policyNumber: 'AX-2025-0002',
+    policyNumber: 'AX-2026-0002',
     vehicleIndex: 2,
-    assessmentIndex: 2,
+    assessmentIndex: 3,   // Škoda ESI GREEN [3]
     dealerIndex: 1,
     dealerUserIndex: 2,
     customer: {
@@ -249,13 +500,13 @@ const POLICIES = [
     mileage_multiplier: 0.9,
     status: 'active' as const,
     payment_status: 'paid' as const,
-    start_date: '2025-04-01',
-    end_date: '2026-04-01',
+    start_date: '2026-04-18',
+    end_date: '2027-04-18',
   },
   {
-    policyNumber: 'AX-2025-0003',
+    policyNumber: 'AX-2026-0003',
     vehicleIndex: 4,
-    assessmentIndex: 4,
+    assessmentIndex: 6,   // Toyota ESI GREEN [6]
     dealerIndex: 0,
     dealerUserIndex: 1,
     customer: {
@@ -274,8 +525,8 @@ const POLICIES = [
     mileage_multiplier: 1.0,
     status: 'pending_payment' as const,
     payment_status: 'unpaid' as const,
-    start_date: '2025-04-15',
-    end_date: '2026-04-15',
+    start_date: '2026-04-18',
+    end_date: '2027-04-18',
   },
 ];
 
@@ -390,24 +641,43 @@ async function seed() {
       console.log(`  vehicle  ${v.make} ${v.model} (${v.vin})`);
     }
 
+    // ── ESI PDF files ──────────────────────────────────────────────────────────
+    // Build a map of r2_key → DB id for use in assessment inserts.
+    const esiPdfIdMap = new Map<string, string>();
+    for (const f of ESI_PDFS) {
+      const r = await client.query<{ id: string }>(
+        `INSERT INTO esi_files (vehicle_id, file_type, filename, size_bytes, r2_key, uploaded_by)
+         VALUES ($1, 'esi_pdf', $2, $3, $4, $5)
+         ON CONFLICT (r2_key) DO UPDATE SET filename = EXCLUDED.filename
+         RETURNING id`,
+        [vehicleIds[f.vehicleIndex], f.filename, f.size_bytes, f.r2_key, userIds[1]]
+      );
+      esiPdfIdMap.set(f.r2_key, r.rows[0].id);
+      console.log(`  esi_file  ${f.filename}`);
+    }
+
     // ── Assessments ────────────────────────────────────────────────────────────
     const assessmentIds: string[] = [];
     for (const a of ASSESSMENTS) {
-      // Check if assessment for this vehicle+source already exists (to stay idempotent)
+      // Idempotency: check by seed_ref stored in payload
       const existing = await client.query<{ id: string }>(
-        `SELECT id FROM vehicle_assessments WHERE vin = $1 AND source = $2 LIMIT 1`,
-        [VEHICLES[a.vehicleIndex].vin, a.source]
+        `SELECT id FROM vehicle_assessments WHERE payload->>'seed_ref' = $1 LIMIT 1`,
+        [a.seedRef]
       );
       if (existing.rows.length > 0) {
         assessmentIds.push(existing.rows[0].id);
         console.log(`  assessment  ${VEHICLES[a.vehicleIndex].vin} [${a.verdict}] — already exists`);
         continue;
       }
+
+      const esiFileId = a.esiPdfKey ? (esiPdfIdMap.get(a.esiPdfKey) ?? null) : null;
+
       const r = await client.query<{ id: string }>(
         `INSERT INTO vehicle_assessments
            (vehicle_id, vin, source, verdict, score_pct, rate_action,
-            assessment_multiplier, reason, rule_set_version, payload, assessed_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+            assessment_multiplier, reason, rule_set_version, payload, assessed_by,
+            esi_file_id, technician_note, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,COALESCE($14::timestamptz, now()))
          RETURNING id`,
         [
           vehicleIds[a.vehicleIndex],
@@ -421,10 +691,13 @@ async function seed() {
           'v1.0',
           JSON.stringify(a.payload),
           userIds[1],
+          esiFileId,
+          a.technician_note,
+          a.created_at,
         ]
       );
       assessmentIds.push(r.rows[0].id);
-      console.log(`  assessment  ${VEHICLES[a.vehicleIndex].vin} [${a.verdict}]`);
+      console.log(`  assessment  ${VEHICLES[a.vehicleIndex].vin} [${a.verdict}] (${a.seedRef})`);
     }
 
     // ── Policies ───────────────────────────────────────────────────────────────
