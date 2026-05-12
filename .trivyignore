@@ -1,0 +1,6 @@
+# PostCSS XSS via unescaped </style> in CSS stringify output
+# Affects Next.js 9.3.4-canary.0 through 16.3.0-canary.5 (postcss < 8.5.10)
+# No viable fix: npm suggests downgrading Next.js to 9.3.3 (breaking).
+# Real fix: upstream Next.js patch that bumps postcss >= 8.5.10.
+# Track: https://github.com/advisories/GHSA-qx2v-qp2m-jg93
+GHSA-qx2v-qp2m-jg93
