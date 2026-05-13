@@ -12,7 +12,10 @@
     "seed": "tsx --env-file=.env.local scripts/seed.ts",
     "reset": "tsx --env-file=.env.local scripts/reset.ts",
     "smoke": "node --env-file=.env.local --import tsx/esm scripts/smoke-test.ts",
-    "audit": "npm audit --audit-level=high"
+    "audit": "npm audit --audit-level=high",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ci": "vitest run --reporter=verbose"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1005.0",
@@ -36,6 +39,8 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "tsx": "^4.20.3",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vite-tsconfig-paths": "^6.1.1",
+    "vitest": "^4.1.6"
   }
 }
