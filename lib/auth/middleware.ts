@@ -15,7 +15,7 @@ let _jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
 function getJwks() {
   if (!_jwks) {
     const issuer  = process.env.AUTH0_ISSUER_BASE_URL!;
-    const jwksUri = process.env.AUTH0_JWKS_URI ?? `${issuer}.well-known/jwks.json`;
+    const jwksUri = process.env.AUTH0_JWKS_URI ?? `${issuer.replace(/\/$/, '')}/.well-known/jwks.json`;
     _jwks = createRemoteJWKSet(new URL(jwksUri));
   }
   return _jwks;
@@ -47,8 +47,14 @@ export async function validateToken(request: NextRequest): Promise<RequestContex
     throw new ApiError(401, 'UNAUTHORIZED', 'Invalid or expired token');
   }
 
-  // Extract permissions from custom Auth0 claim
-  const permissions = (payload[`${CLAIMS_NS}/permissions`] as string[] | undefined) ?? [];
+  // Extract permissions from custom Auth0 claim (injected by Auth0 Action in prod).
+  // Fall back to standard RBAC `permissions` with name normalisation for dev tenants
+  // where the Action is not deployed (e.g. vehicle:read → VEHICLE_READ).
+  const customClaim = payload[`${CLAIMS_NS}/permissions`] as string[] | undefined;
+  const stdClaim    = payload['permissions'] as string[] | undefined;
+  const permissions = customClaim
+    ?? stdClaim?.map((p) => p.toUpperCase().replace(/[:\-]/g, '_'))
+    ?? [];
 
   // Extract dealer_id for dealer users (set by Auth0 Action from organization metadata)
   const dealerId = (payload[`${CLAIMS_NS}/dealer_id`] as string | undefined) ?? undefined;
